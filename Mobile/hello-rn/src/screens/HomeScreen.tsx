@@ -13,6 +13,7 @@ import {
   SafeAreaView
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import api from '../services/api';
 import { Defeito } from '../types/Defeito';
 
@@ -24,6 +25,10 @@ export default function HomeScreen() {
   const [foto, setFoto] = useState<string | null>(null);
   const [defeitos, setDefeitos] = useState<Defeito[]>([]);
   const [loading, setLoading] = useState(false);
+  
+  // Guardamos a localização exata para enviar ao banco (separado do texto)
+  const [location, setLocation] = useState<Location.LocationObject | null>(null);
+  const [gpsLoading, setGpsLoading] = useState(false);
 
   useEffect(() => {
     carregarDefeitos();
@@ -34,14 +39,41 @@ export default function HomeScreen() {
       const response = await api.get('/defeitos');
       setDefeitos(response.data);
     } catch (error) {
-      console.log("Erro ao carregar (Backend pode estar offline):", error);
+      console.log("Erro ao carregar:", error);
+    }
+  };
+
+  // --- NOVA LÓGICA DE GPS ---
+  const obterLocalizacao = async () => {
+    setGpsLoading(true);
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    
+    if (status !== 'granted') {
+      Alert.alert('Permissão negada', 'Precisamos de acesso à localização.');
+      setGpsLoading(false);
+      return;
+    }
+
+    try {
+      const loc = await Location.getCurrentPositionAsync({});
+      setLocation(loc);
+      
+      // AQUI ESTÁ A MÁGICA:
+      // Pegamos o que já está escrito no local e adicionamos as coordenadas
+      const coordsTexto = ` (Lat: ${loc.coords.latitude.toFixed(5)}, Long: ${loc.coords.longitude.toFixed(5)})`;
+      setLocal((prevLocal) => prevLocal + coordsTexto);
+      
+    } catch (error) {
+      Alert.alert('Erro', 'Não foi possível pegar o GPS.');
+    } finally {
+      setGpsLoading(false);
     }
   };
 
   const tirarFoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert('Permissão negada', 'Precisamos acesso à câmera para registrar o defeito.');
+      Alert.alert('Permissão negada', 'Precisamos acesso à câmera.');
       return;
     }
 
@@ -59,18 +91,21 @@ export default function HomeScreen() {
 
   const salvarDefeito = async () => {
     if (!titulo || !local || !laboratorio) {
-      Alert.alert('Campos vazios', 'Por favor, preencha Título, Local e Laboratório.');
+      Alert.alert('Campos vazios', 'Preencha Título, Local e Laboratório.');
       return;
     }
 
     setLoading(true);
     try {
-      const novoDefeito: Defeito = {
+      const novoDefeito = {
         titulo,
         descricao,
         local,
         laboratorio,
         foto,
+        // envia as coordenadas numéricas para o banco (para futuros mapas)
+        latitude: location?.coords.latitude,
+        longitude: location?.coords.longitude,
       };
 
       const response = await api.post('/defeitos', novoDefeito);
@@ -81,17 +116,18 @@ export default function HomeScreen() {
       setLocal('');
       setLaboratorio('');
       setFoto(null);
+      setLocation(null);
       
-      Alert.alert('Sucesso', 'Registro salvo com sucesso!');
+      Alert.alert('Sucesso', 'Registro salvo!');
     } catch (error) {
       console.error(error);
-      Alert.alert('Erro', 'Não foi possível salvar. Verifique se o Backend está rodando.');
+      Alert.alert('Erro', 'Não foi possível salvar.');
     } finally {
       setLoading(false);
     }
   };
 
-  const renderItem = ({ item }: { item: Defeito }) => (
+  const renderItem = ({ item }: { item: any }) => (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
         <Text style={styles.cardTitle}>{item.titulo}</Text>
@@ -102,20 +138,15 @@ export default function HomeScreen() {
       
       <Text style={styles.cardLocal}>📍 {item.local}</Text>
       
-      {item.descricao ? (
-        <Text style={styles.cardDesc}>{item.descricao}</Text>
-      ) : null}
-
-      {item.foto && (
-        <Image source={{ uri: item.foto }} style={styles.cardImage} resizeMode="cover" />
-      )}
+      {item.descricao ? <Text style={styles.cardDesc}>{item.descricao}</Text> : null}
+      {item.foto && <Image source={{ uri: item.foto }} style={styles.cardImage} resizeMode="cover" />}
     </View>
   );
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        <Text style={styles.mainTitle}>Sis<Text style={{color: '#4a90e2'}}>Manutenção</Text></Text>
+        <Text style={styles.mainTitle}>Sis<Text style={{color: '#0e7291ff'}}>Manutenção</Text></Text>
         
         <View style={styles.formContainer}>
           <ScrollView showsVerticalScrollIndicator={false}>
@@ -124,60 +155,51 @@ export default function HomeScreen() {
             <TextInput 
               style={styles.input} 
               placeholder="Título do Problema" 
-              placeholderTextColor="#999"
               value={titulo} 
               onChangeText={setTitulo} 
             />
             
-            <View style={styles.rowInputs}>
+            <TextInput 
+              style={styles.input} 
+              placeholder="Nome do Local" 
+              value={laboratorio} 
+              onChangeText={setLaboratorio} 
+            />
+
+            {/* localização com botão de GPS embutido */}
+            <View style={styles.inputContainer}>
               <TextInput 
-                style={[styles.input, styles.halfInput]} 
-                placeholder="Laboratório" 
-                placeholderTextColor="#999"
-                value={laboratorio} 
-                onChangeText={setLaboratorio} 
-              />
-              <TextInput 
-                style={[styles.input, styles.halfInput]} 
+                style={styles.inputFlex} 
                 placeholder="Local exato" 
-                placeholderTextColor="#999"
                 value={local} 
                 onChangeText={setLocal} 
               />
+              <TouchableOpacity onPress={obterLocalizacao} style={styles.gpsIconBtn}>
+                {gpsLoading ? (
+                  <ActivityIndicator size="small" color="#4a90e2" />
+                ) : (
+                  <Text style={{fontSize: 20}}>📍</Text>
+                )}
+              </TouchableOpacity>
             </View>
 
             <TextInput 
               style={[styles.input, styles.textArea]} 
-              placeholder="Descreva o defeito..." 
-              placeholderTextColor="#999"
+              placeholder="Descreva o problema..." 
               value={descricao} 
               onChangeText={setDescricao} 
               multiline 
             />
 
             <View style={styles.buttonRow}>
-              <TouchableOpacity 
-                style={[styles.button, styles.photoButton, foto ? styles.photoButtonActive : {}]} 
-                onPress={tirarFoto}
-              >
-                <Text style={styles.buttonText}>
-                  {foto ? "📸 Foto OK" : "📷 Adicionar Foto"}
-                </Text>
+              <TouchableOpacity style={[styles.button, styles.photoButton, foto ? styles.photoButtonActive : {}]} onPress={tirarFoto}>
+                <Text style={styles.buttonText}>{foto ? "📸 Foto OK" : "Câmera"}</Text>
               </TouchableOpacity>
-
               {foto && <Image source={{ uri: foto }} style={styles.miniPreview} />}
             </View>
 
-            <TouchableOpacity 
-              style={[styles.button, styles.saveButton, loading && { opacity: 0.7 }]} 
-              onPress={salvarDefeito}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFF" />
-              ) : (
-                <Text style={styles.buttonText}>💾 Salvar Registro</Text>
-              )}
+            <TouchableOpacity style={[styles.button, styles.saveButton]} onPress={salvarDefeito} disabled={loading}>
+              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>Salvar</Text>}
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -189,7 +211,6 @@ export default function HomeScreen() {
             keyExtractor={(item) => item._id || Math.random().toString()}
             renderItem={renderItem}
             contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
           />
         </View>
       </View>
@@ -204,7 +225,7 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    paddingTop: 40, // Espaço para a barra de status
+    paddingTop: 40,
   },
   mainTitle: {
     fontSize: 28,
@@ -222,9 +243,11 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   formContainer: {
-    maxHeight: '50%', // O formulário ocupa metade da tela no máximo
+    maxHeight: '55%',
     paddingHorizontal: 20,
   },
+
+  // inputs
   input: {
     backgroundColor: '#FFF',
     padding: 15,
@@ -233,22 +256,46 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E0E0E0',
     fontSize: 16,
+    color: '#333',
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 5,
     elevation: 2,
   },
-  rowInputs: {
+  inputContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    marginBottom: 12,
+    paddingRight: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 2,
   },
-  halfInput: {
-    width: '48%',
+  inputFlex: {
+    flex: 1,
+    paddingVertical: 15,
+    paddingHorizontal: 15,
+    fontSize: 16,
+    color: '#333',
+  },
+  gpsIconBtn: {
+    backgroundColor: '#F0F4F8',
+    padding: 10,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   textArea: {
     height: 100,
     textAlignVertical: 'top',
   },
+
+  // botões
   buttonRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -285,9 +332,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#28a745',
   },
   saveButton: {
-    backgroundColor: '#4a90e2', // Azul moderno
+    backgroundColor: '#4a90e2',
     marginBottom: 20,
   },
+
+  // lista e os cards
   listContainer: {
     flex: 1,
     backgroundColor: '#E9ECEF',
@@ -313,7 +362,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
     borderLeftWidth: 5,
-    borderLeftColor: '#4a90e2', // Detalhe colorido na esquerda do card
+    borderLeftColor: '#4a90e2',
   },
   cardHeader: {
     flexDirection: 'row',

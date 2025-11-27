@@ -115,7 +115,7 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        <Text style={styles.mainTitle}>Manutenção <Text style={{color: '#4a90e2'}}>Lab</Text></Text>
+        <Text style={styles.mainTitle}>Sis<Text style={{color: '#4a90e2'}}>Manutenção</Text></Text>
         
         <View style={styles.formContainer}>
           <ScrollView showsVerticalScrollIndicator={false}>
